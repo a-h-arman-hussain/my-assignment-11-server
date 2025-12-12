@@ -278,44 +278,51 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/all-scholarships", async (req, res) => {
-      let query = {};
+    // GET /scholarships?search=&subjectCategory=&scholarshipCategory=&degree=&sortField=&sortOrder=
+    app.get("/scholarships", async (req, res) => {
+      try {
+        const {
+          search,
+          subjectCategory,
+          scholarshipCategory,
+          degree,
+          sortField = "postDate",
+          sortOrder = "desc",
+        } = req.query;
 
-      const {
-        email,
-        universityName,
-        universityCountry,
-        universityWorldRank,
-        subjectCategory,
-        scholarshipCategory,
-        degree,
-        search,
-      } = req.query;
+        const query = {};
 
-      if (email) query.postedUserEmail = email;
-      if (universityName) query.universityName = universityName;
-      if (universityCountry) query.universityCountry = universityCountry;
-      if (subjectCategory) query.subjectCategory = subjectCategory;
-      if (scholarshipCategory) query.scholarshipCategory = scholarshipCategory;
-      if (degree) query.degree = degree;
+        if (search) {
+          query.$or = [
+            { scholarshipName: { $regex: search, $options: "i" } },
+            { universityName: { $regex: search, $options: "i" } },
+            { degree: { $regex: search, $options: "i" } },
+          ];
+        }
 
-      if (universityWorldRank) {
-        query.universityWorldRank = { $lte: Number(universityWorldRank) };
+        if (subjectCategory) query.subjectCategory = subjectCategory;
+        if (scholarshipCategory)
+          query.scholarshipCategory = scholarshipCategory;
+        if (degree) query.degree = degree;
+
+        // numeric fields should be numbers
+        let sortObj = {};
+        if (sortField === "applicationFees") {
+          sortObj[sortField] = sortOrder === "desc" ? -1 : 1;
+        } else if (sortField === "postDate") {
+          sortObj[sortField] = sortOrder === "desc" ? -1 : 1;
+        }
+
+        const scholarships = await scholarCollection
+          .find(query)
+          .sort(sortObj)
+          .toArray();
+
+        res.send(scholarships);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Internal server error" });
       }
-
-      if (search) {
-        query.$or = [
-          { scholarshipName: { $regex: search, $options: "i" } },
-          { universityName: { $regex: search, $options: "i" } },
-        ];
-      }
-
-      const result = await universityCollection
-        .find(query)
-        .sort({ scholarshipPostDate: -1 })
-        .toArray();
-
-      res.send(result);
     });
 
     app.get("/latest-scholarships", async (req, res) => {
@@ -340,7 +347,7 @@ async function run() {
       res.send(result);
     });
 
-    app.post("/apply-scholarships", async (req, res) => {
+    app.post("/apply-scholarships", verifyFBToken, async (req, res) => {
       try {
         const application = req.body;
 
@@ -364,7 +371,7 @@ async function run() {
       }
     });
 
-    app.get("/my-applications", async (req, res) => {
+    app.get("/my-applications", verifyFBToken, async (req, res) => {
       const email = req.query.email;
       if (!email) return res.status(400).send([]);
 
@@ -376,7 +383,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/my-applications/:id", async (req, res) => {
+    app.get("/my-applications/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const result = await applicationsCollection.findOne({
@@ -420,7 +427,7 @@ async function run() {
       }
     });
 
-    app.delete("/delete-application/:id", async (req, res) => {
+    app.delete("/delete-application/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const result = await applicationsCollection.deleteOne({
         _id: new ObjectId(id),
@@ -453,7 +460,7 @@ async function run() {
       }
     });
 
-    app.get("/my-reviews", async (req, res) => {
+    app.get("/my-reviews", verifyFBToken, async (req, res) => {
       try {
         const email = req.query.email;
         if (!email)
@@ -475,7 +482,7 @@ async function run() {
       }
     });
 
-    app.patch("/update-review/:id", async (req, res) => {
+    app.patch("/update-review/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const updateData = req.body;
@@ -494,7 +501,7 @@ async function run() {
       }
     });
 
-    app.delete("/delete-review/:id", async (req, res) => {
+    app.delete("/delete-review/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const result = await reviewsCollection.deleteOne({
