@@ -615,6 +615,73 @@ async function run() {
     //   }
     // });
 
+    // app.patch("/payment-success", verifyFBToken, async (req, res) => {
+    //   try {
+    //     const { session_id: sessionId } = req.query;
+    //     if (!sessionId) {
+    //       return res.status(400).send({ error: "Session ID is required" });
+    //     }
+
+    //     const session = await stripe.checkout.sessions.retrieve(sessionId);
+    //     if (!session) {
+    //       return res.status(400).send({ error: "Session not found" });
+    //     }
+
+    //     if (session.payment_status !== "paid") {
+    //       return res
+    //         .status(400)
+    //         .send({ success: false, message: "Payment not successful" });
+    //     }
+
+    //     const { scholarshipId, scholarshipName } = session.metadata;
+    //     const trackingId = generateTrackingId();
+    //     const userEmail = session.customer_email;
+
+    //     const existingPayment = await paymentCollection.findOne({
+    //       scholarshipId,
+    //     });
+    //     if (existingPayment) {
+    //       return res
+    //         .status(400)
+    //         .send({ success: false, message: "Payment already exists" });
+    //     }
+
+    //     const paymentHistory = {
+    //       amount: session.amount_total / 100,
+    //       currency: session.currency,
+    //       customerEmail: userEmail,
+    //       scholarshipId,
+    //       scholarshipName,
+    //       transactionId: session.payment_intent,
+    //       paymentStatus: session.payment_status,
+    //       paidAt: new Date(),
+    //     };
+
+    //     const insertPayment = await paymentCollection.insertOne(paymentHistory);
+
+    //     const updateResult = await applicationsCollection.updateOne(
+    //       { _id: new ObjectId(scholarshipId) },
+    //       {
+    //         $set: {
+    //           paymentStatus: "paid",
+    //           trackingId,
+    //         },
+    //       }
+    //     );
+    //     console.log('dfkjdkj')
+    //     res.send({
+    //       success: true,
+    //       updatedApplication: updateResult,
+    //       trackingId,
+    //       transactionId: session.payment_intent,
+    //       paymentInfo: insertPayment,
+    //     });
+    //   } catch (err) {
+    //     console.error("Payment success error:", err);
+    //     res.status(500).send({ error: "Internal server error" });
+    //   }
+    // });
+
     app.patch("/payment-success", verifyFBToken, async (req, res) => {
       try {
         const { session_id: sessionId } = req.query;
@@ -637,20 +704,40 @@ async function run() {
         const trackingId = generateTrackingId();
         const userEmail = session.customer_email;
 
+        // --- 1. Check for existing payment using the string ID ---
         const existingPayment = await paymentCollection.findOne({
           scholarshipId,
         });
         if (existingPayment) {
-          return res
-            .status(400)
-            .send({ success: false, message: "Payment already exists" });
+          return res.status(400).send({
+            success: false,
+            message: "Payment already exists for this scholarship",
+          });
+        }
+
+        // --- 2. Convert string ID to ObjectId with error handling (The FIX) ---
+        let applicationObjectId;
+        try {
+          // Assuming scholarshipId is the _id of the application document
+          applicationObjectId = new ObjectId(scholarshipId);
+        } catch (e) {
+          console.error(
+            "Invalid Application ID format from Stripe metadata:",
+            scholarshipId,
+            e
+          );
+          // Return a 400 error if the ID is malformed
+          return res.status(400).send({
+            success: false,
+            message: "Invalid Application ID format received.",
+          });
         }
 
         const paymentHistory = {
           amount: session.amount_total / 100,
           currency: session.currency,
           customerEmail: userEmail,
-          scholarshipId,
+          scholarshipId, // Storing the application string ID
           scholarshipName,
           transactionId: session.payment_intent,
           paymentStatus: session.payment_status,
@@ -659,8 +746,9 @@ async function run() {
 
         const insertPayment = await paymentCollection.insertOne(paymentHistory);
 
+        // --- 3. Update the Application document using the validated ObjectId ---
         const updateResult = await applicationsCollection.updateOne(
-          { _id: new ObjectId(scholarshipId) },
+          { _id: applicationObjectId }, // Use the validated ObjectId
           {
             $set: {
               paymentStatus: "paid",
@@ -668,7 +756,19 @@ async function run() {
             },
           }
         );
-        console.log('dfkjdkj')
+
+        // --- 4. Check if a document was actually modified (Added Check) ---
+        if (updateResult.modifiedCount === 0) {
+          //   console.warn(Application document not found or not modified for ID: ${scholarshipId});
+          // Although payment was recorded, the application was not updated, which is an issue
+          return res.status(404).send({
+            success: false,
+            message:
+              "Payment recorded, but application document was not found or updated.",
+          });
+        }
+
+        console.log("Application successfully updated and payment recorded.");
         res.send({
           success: true,
           updatedApplication: updateResult,
@@ -677,7 +777,7 @@ async function run() {
           paymentInfo: insertPayment,
         });
       } catch (err) {
-        console.error("Payment success error:", err);
+        console.error("Payment success internal error:", err);
         res.status(500).send({ error: "Internal server error" });
       }
     });
