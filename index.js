@@ -57,7 +57,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("scholarStreamDB");
     const usersCollection = db.collection("users");
     const scholarCollection = db.collection("scholarships");
@@ -534,33 +534,118 @@ async function run() {
 
     // payment related apis
     // new
-    app.post("/payment-checkout-session", async (req, res) => {
-      const paymentInfo = req.body;
-      console.log("paymentInfo", paymentInfo);
-      const amount = Number(paymentInfo.applicationFees) * 100;
+    // app.post("/payment-checkout-session", async (req, res) => {
+    //   const paymentInfo = req.body;
+    //   console.log("paymentInfo", paymentInfo);
+    //   const amount = Number(paymentInfo.applicationFees) * 100;
+    //   const session = await stripe.checkout.sessions.create({
+    //     line_items: [
+    //       {
+    //         price_data: {
+    //           currency: "USD",
+    //           unit_amount: amount,
+    //           product_data: {
+    //             name: `Please pay for: ${paymentInfo.scholarshipName}`,
+    //           },
+    //         },
+    //         quantity: 1,
+    //       },
+    //     ],
+    //     mode: "payment",
+    //     metadata: {
+    //       scholarshipId: paymentInfo.scholarshipId,
+    //       scholarshipName: paymentInfo.scholarshipName,
+    //     },
+    //     customer_email: paymentInfo.email,
+    //     success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+    //     cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+    //   });
+    //   res.send({ url: session.url });
+    // });
+
+    app.post("/payments/init", async (req, res) => {
+      const {
+        applicationId,
+        scholarshipId,
+        scholarshipName,
+        universityName,
+        amount,
+        userEmail,
+        studentEmail,
+        studentName,
+      } = req.body;
+
+      // 🔐 Safety check
+      const application = await applicationsCollection.findOne({
+        _id: new ObjectId(applicationId),
+        paymentStatus: "pending",
+      });
+
+      if (!application) {
+        return res.status(400).send({ message: "Invalid application" });
+      }
+
+      // 1️⃣ Stripe session
       const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        customer_email: userEmail,
+
         line_items: [
           {
             price_data: {
-              currency: "USD",
-              unit_amount: amount,
+              currency: "usd",
               product_data: {
-                name: `Please pay for: ${paymentInfo.scholarshipName}`,
+                name: scholarshipName,
               },
+              unit_amount: amount * 100,
             },
             quantity: 1,
           },
         ],
-        mode: "payment",
+
         metadata: {
-          scholarshipId: paymentInfo.scholarshipId,
-          scholarshipName: paymentInfo.scholarshipName,
+          applicationId,
         },
-        customer_email: paymentInfo.email,
-        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        // // &applicationId=${applicationId}
+        // success_url: `http://localhost:5173/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}&applicationId=${applicationId}`,
+        // cancel_url: "http://localhost:5173/payment-cancel",
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+        //   });
       });
+
       res.send({ url: session.url });
+    });
+
+    app.patch("/payments/complete/:applicationId", async (req, res) => {
+      const { sessionId } = req.body;
+      const { applicationId } = req.params;
+
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+      if (session.payment_status !== "paid") {
+        return res.status(400).send({ message: "Payment not completed" });
+      }
+
+      // update application document
+      await applicationsCollection.updateOne(
+        { _id: new ObjectId(applicationId) },
+        {
+          $set: {
+            paymentStatus: "paid",
+            applicationStatus: "processing",
+            transactionId: session.payment_intent,
+            paidAt: new Date(),
+          },
+        }
+      );
+
+      const updatedApplication = await applicationsCollection.findOne({
+        _id: new ObjectId(applicationId),
+      });
+
+      res.send(updatedApplication);
     });
 
     // app.patch("/payment-success", verifyFBToken, async (req, res) => {
@@ -830,10 +915,10 @@ async function run() {
     //   }
     // });
 
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
