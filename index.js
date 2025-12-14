@@ -81,16 +81,12 @@ async function run() {
       res.send(users);
     });
 
-    app.get(
-      "/users/:email/role",
-      verifyFBToken,
-      async (req, res) => {
-        const email = req.params.email;
-        const query = { email };
-        const user = await usersCollection.findOne(query);
-        res.send({ role: user?.role || "Student" });
-      }
-    );
+    app.get("/users/:email/role", verifyFBToken, async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      res.send({ role: user?.role || "Student" });
+    });
 
     app.patch(
       "/users/:id/role",
@@ -274,6 +270,32 @@ async function run() {
         return res.send(null);
       }
       res.send(user);
+    });
+
+    // PATCH /users/update
+    app.patch("/users/update", verifyFBToken, async (req, res) => {
+      try {
+        const { photo, name, cover } = req.body;
+
+        const email = req.decoded_email; // decoded_email থেকে নাও
+        const updateData = {};
+        if (photo) updateData.photo = photo;
+        if (name) updateData.name = name;
+        if (cover) updateData.cover = cover;
+
+        const result = await client
+          .db("scholarStreamDB")
+          .collection("users")
+          .updateOne({ email }, { $set: updateData });
+
+        if (result.matchedCount === 0)
+          return res.status(404).send({ message: "User not found" });
+
+        res.send({ success: true, updatedFields: updateData });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false, message: "Server error" });
+      }
     });
 
     app.get("/all-scholarships", async (req, res) => {
