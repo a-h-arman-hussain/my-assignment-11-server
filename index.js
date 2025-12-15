@@ -303,7 +303,6 @@ async function run() {
       res.send(result);
     });
 
-    // search and filtering scholarships
     app.get("/scholarships", async (req, res) => {
       try {
         const {
@@ -352,7 +351,7 @@ async function run() {
     app.get("/latest-scholarships", async (req, res) => {
       const result = await scholarCollection
         .find()
-        .sort({ scholarshipPostDate: -1 })
+        .sort({ postDate: -1 })
         .limit(8)
         .toArray();
       res.send(result);
